@@ -43,6 +43,7 @@ import {
     tradePlugin,
     webhookPlugin,
 } from "@elizaos/plugin-coinbase";
+import { coinGeckoPlugin } from "@elizaos/plugin-coingecko";
 import { confluxPlugin } from "@elizaos/plugin-conflux";
 import { evmPlugin } from "@elizaos/plugin-evm";
 import { storyPlugin } from "@elizaos/plugin-story";
@@ -609,6 +610,9 @@ export async function createAgent(
             getSecret(character, "ECHOCHAMBERS_API_KEY")
                 ? echoChamberPlugin
                 : null,
+            getSecret(character, "COINGECKO_API_KEY")
+            ? coinGeckoPlugin
+            : null,
         ].filter(Boolean),
         providers: [],
         actions: [],

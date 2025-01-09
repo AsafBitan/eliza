@@ -38,12 +38,13 @@
         "lerna": "8.1.5",
         "only-allow": "1.2.1",
         "prettier": "3.4.1",
+        "ts-node": "^10.9.2",
         "turbo": "2.3.3",
         "typedoc": "0.26.11",
         "typescript": "5.6.3",
+        "viem": "2.21.58",
         "vite": "5.4.11",
-        "vitest": "2.1.5",
-        "viem": "2.21.58"
+        "vitest": "2.1.5"
     },
     "pnpm": {
         "overrides": {
@@ -59,6 +60,7 @@
         "@deepgram/sdk": "^3.9.0",
         "@vitest/eslint-plugin": "1.0.1",
         "amqplib": "0.10.5",
+        "better-sqlite3": "11.6.0",
         "csv-parse": "5.6.0",
         "ollama-ai-provider": "0.16.1",
         "optional": "0.1.4",
