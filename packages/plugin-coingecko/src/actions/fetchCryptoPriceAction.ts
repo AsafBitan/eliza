@@ -9,18 +9,70 @@ import {
     composeContext,
     generateMessageResponse,
     getEmbeddingZeroVector,
+    elizaLogger,
+    generateText,
 } from "@elizaos/core";
 import { getCoinPriceTemplate } from "../templates/getCoinPriceTemplate";
 
-async function getCoinPrice(coin: string, currency: string = 'usd') {
-    try {
-        const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=${currency}&ids=${coin}&x_cg_demo_api_key=${process.env.COINGECKO_API_KEY}`;
-        const response = await fetch(url, {
+// If you have a pro account, you can use this url: 'https://pro-api.coingecko.com/api/v3/search'
+async function getCoinId(coin: string){
+    try{
+        const url = 'https://api.coingecko.com/api/v3/search'
+        const apiKey = process.env.COINGECKO_API_KEY ? `&x_cg_demo_api_key=${process.env.COINGECKO_API_KEY}` : '';
+        const response = await fetch(`${url}?query=${coin}`, {
             method: "GET",
             headers: {
                 'accept': 'application/json',
+                'x_cg_demo_api_key': apiKey
             }
         });
+
+        if (!response.ok) {
+            console.error(`Error: Received HTTP status ${response.status}`);
+            return null;
+        }
+
+        const data = await response.json();
+
+        if (!data || !data.coins || data.coins.length === 0) {
+            console.error(`Couldn't find the coinId for the coin "${coin}".`);
+            return null;
+        }
+
+        // Find the first coin with a matching name or symbol
+        const coinId = data.coins[0]?.id;
+        if (!coinId) {
+            console.error(`No coinId found for the coin "${coin}".`);
+            return null;
+        }
+
+        return coinId;
+
+    } catch (error) {
+        console.error('Error fetching coinId:', error);
+        return null;
+    }
+}
+// If you have a pro account, you can use this url: 'https://pro-api.coingecko.com/api/v3/simple/price'
+async function getCoinPrice(coin: string, currency: string = 'usd') {
+
+    const baseUrl = 'https://api.coingecko.com/api/v3/simple/price';
+    const apiKey = process.env.COINGECKO_API_KEY ? `&x_cg_demo_api_key=${process.env.COINGECKO_API_KEY}` : '';
+    const url = `${baseUrl}?ids=${coin}&vs_currencies=${currency}`;
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'accept': 'application/json',
+                'x_cg_demo_api_key': apiKey
+            },
+        });
+
+        if (!response.ok) {
+            console.error(`Error: Received HTTP status ${response.status}`);
+            return null;
+        }
 
         const data = await response.json();
 
@@ -28,7 +80,13 @@ async function getCoinPrice(coin: string, currency: string = 'usd') {
             return `Couldn't find the price for the coin ${coin} in ${currency}`;
         }
 
-        const price = data[0].current_price;
+        const price = data[coin]?.[currency];
+
+        if (!price) {
+            console.error(`Couldn't find the price for the coin "${coin}" in currency "${currency}".`);
+            return null;
+        }
+
         return price;
 
     } catch (error) {
@@ -55,7 +113,7 @@ export const fetchCryptoPriceAction: Action = {
         );
     },
     description:
-        "Respond but perform no additional action. This is the default if the agent is speaking and not doing anything additional.",
+        "Get the current price of a given cryptocurrency in a specific currency.",
     handler: async (
         _runtime: IAgentRuntime,
         _message: Memory,
@@ -63,8 +121,10 @@ export const fetchCryptoPriceAction: Action = {
         _options: any,
         _callback: HandlerCallback
     ): Promise<boolean> => {
-         // Initialize/update state
-         if (!_state) {
+
+        try{
+            // Initialize/update state
+        if (!_state) {
             _state = (await _runtime.composeState(_message)) as State;
         }
         _state = await _runtime.updateRecentMessageState(_state);
@@ -87,9 +147,18 @@ export const fetchCryptoPriceAction: Action = {
             return false;
         }
 
-        const coineprice = await getCoinPrice(String(content.coinId), String(content.currency));
+        const coinIdFromCoinGecko = await getCoinId(String(content.coinId));
 
-        const responseText = `The current price of ${content.coinId} is ${coineprice} in ${content.currency}`;
+        const coineprice = await getCoinPrice(String(coinIdFromCoinGecko), String(content.currency));
+
+        const formattedPrice = coineprice ? coineprice.toLocaleString() : null;
+
+        const currentTime = new Date().toLocaleTimeString();
+
+       // Construct the response
+        const responseText = coineprice
+            ? `As of ${currentTime}, The current price of ${coinIdFromCoinGecko} is ${formattedPrice} ${content.currency}`
+            : `Couldn't find the price for the coin ${content.coinId} in ${content.currency}`;
 
         const newMemory: Memory = {
             userId: _message.agentId,
@@ -104,14 +173,22 @@ export const fetchCryptoPriceAction: Action = {
         };
 
         await _runtime.messageManager.createMemory(newMemory);
+//Sorry, something went wrong. Please try again.
 
         _callback({
             text: responseText,
-            content: coineprice,
+            content: {
+                coineprice,
+                content,},
             memory: newMemory.content,
         });
 
         return true;
+        } catch (error) {
+            console.error('Error in handler:', error);
+            _callback({ text: "Sorry, something went wrong. Please try again." });
+            return false;
+        }
     },
     examples: [
         [
@@ -122,7 +199,8 @@ export const fetchCryptoPriceAction: Action = {
             {
                 user: "{{agentName}}",
                 content: {
-                    text: "Fetching the current price of BTC. One moment... \n It's Thursday, January 9th, 2025 at 10:36 AM UTC. The current price of Bitcoin is $50000 in USD.",
+                    text: "Fetching the current price of BTC from CoinGecko. One moment...",
+                    action: "GET_CRYPTO_PRICE",
                 },
             },
         ],
@@ -134,7 +212,8 @@ export const fetchCryptoPriceAction: Action = {
             {
                 user: "{{agentName}}",
                 content: {
-                    text: "Fetching the current price of Solana in USD. One moment... \n It's Thursday, January 9th, 2025 at 10:36 AM UTC. The current price of Solana is $50000 in USD.",
+                    text: "Fetching the current price of Solana in USD from CoinGecko. One moment...",
+                    action: "GET_CRYPTO_PRICE",
                 },
             },
 
@@ -147,19 +226,21 @@ export const fetchCryptoPriceAction: Action = {
             {
                 user: "{{agentName}}",
                 content: {
-                    text: "Let me get the price of Ethereum for you. Give me a minute... \n It's Wednesday, January 8th, 2025 at 5:24 PM UTC. The price of Ethereum is $2000",
+                    text: "Let me get the price of Ethereum from CoinGecko for you. Give me a minute...",
+                    action: "GET_CRYPTO_PRICE",
                 },
             },
         ],
         [
             {
                 user: "{{user1}}",
-                content: { text: "fetch bitcoin price" },
+                content: { text: "fetch bitcoin price in EUR" },
             },
             {
                 user: "{{agentName}}",
                 content: {
-                    text: "Getting the price of Bitcoin now. One moment please...\n It's Sunday, January 5th, 2025 at 12:00 PM UTC. The price of Bitcoin is $50000",
+                    text: "Getting the price of Bitcoin from CoinGecko now. One moment please...",
+                    action: "GET_CRYPTO_PRICE",
                 },
             },
         ],
@@ -171,7 +252,8 @@ export const fetchCryptoPriceAction: Action = {
             {
                 user: "{{agentName}}",
                 content: {
-                    text: "Getting the price of Litecoin now. One moment please... \n According to real-time data, the price of Litecoin is $200 pulled form coingecko",
+                    text: "Getting the price of Litecoin from CoinGecko now. One moment please...",
+                    action: "GET_CRYPTO_PRICE",
                 },
             },
         ],
@@ -183,7 +265,8 @@ export const fetchCryptoPriceAction: Action = {
             {
                 user: "{{agentName}}",
                 content: {
-                    text: "Let me get the price of Ripple for you. Give me a minute... \n The price of Ripple is $1 as of the current time using the coingecko api",
+                    text: "Let me get the price of Ripple from CoinGecko for you. Give me a minute...",
+                    action: "GET_CRYPTO_PRICE",
                 },
             },
         ],
@@ -195,7 +278,8 @@ export const fetchCryptoPriceAction: Action = {
             {
                 user: "{{agentName}}",
                 content: {
-                    text: "Fetching the current price of Dogecoin. One moment... \n The price of Dogecoin is $0.5, at this time of 10.30am on 9th of January 2025",
+                    text: "Fetching the current price of Dogecoin from CoinGecko. One moment...",
+                    action: "GET_CRYPTO_PRICE",
                 },
             },
         ],
@@ -207,7 +291,8 @@ export const fetchCryptoPriceAction: Action = {
             {
                 user: "{{agentName}}",
                 content: {
-                    text: "Fetching the current price of Solana. One moment... \n The price of Solana is $100, at this time of 11.38am on 5th of January 2025",
+                    text: "Fetching the current price of Solana from CoinGecko. One moment...",
+                    action: "GET_CRYPTO_PRICE",
                 },
             },
         ],
